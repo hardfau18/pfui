@@ -27,11 +27,19 @@ impl HyprlandListener {
             HyprlandOpts::Workspace => {
                 let print_workspace = || {
                     if let Ok(wspaces) = Workspaces::get() {
-                        crate::print(&Some(wspaces.collect()));
+                        let mut wspaces = wspaces.collect();
+                        wspaces.sort_by_key(|wspace| match wspace.id {
+                            hyprland::shared::WorkspaceType::Unnamed(id) => id,
+                            hyprland::shared::WorkspaceType::Named(_) => i32::MAX,
+                            hyprland::shared::WorkspaceType::Special(_) => i32::MAX,
+                        });
+                        crate::print(&Some(wspaces));
                     } else {
                         crate::print::<()>(&None);
                     }
                 };
+                // for initial;
+                print_workspace();
                 listener.add_workspace_added_handler(move |wtype| {
                     eprintln!("Workspace {wtype:?} added");
                     print_workspace()
