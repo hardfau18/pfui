@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Subcommand;
 use hyprland::{
-    data::{Client, Devices, Workspaces},
+    data::{Client, Devices, Workspace, Workspaces},
     event_listener::EventListener,
     prelude::*,
 };
@@ -12,6 +12,12 @@ pub enum HyprlandOpts {
     Workspace,
     Window,
     Keyboard,
+}
+
+#[derive(Serialize)]
+struct WorkspaceData {
+    is_active: bool,
+    data: Workspace,
 }
 
 pub struct HyprlandListener {
@@ -27,8 +33,16 @@ impl HyprlandListener {
             HyprlandOpts::Workspace => {
                 let print_workspace = || {
                     if let Ok(wspaces) = Workspaces::get() {
-                        let mut wspaces: Vec<_> = wspaces.collect();
-                        wspaces.sort_by_key(|wspace| match wspace.id {
+                        let active_workspace = Workspace::get_active();
+                        let mut wspaces: Vec<_> = wspaces
+                            .into_iter()
+                            .map(|w| {
+                                let is_active =
+                                    matches!(&active_workspace, Ok(space) if space.id == w.id);
+                                WorkspaceData { is_active, data: w }
+                            })
+                            .collect();
+                        wspaces.sort_by_key(|wspace| match wspace.data.id {
                             hyprland::shared::WorkspaceType::Unnamed(id) => id,
                             hyprland::shared::WorkspaceType::Named(_) => i32::MAX,
                             hyprland::shared::WorkspaceType::Special(_) => i32::MAX,
