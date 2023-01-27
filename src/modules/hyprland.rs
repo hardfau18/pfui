@@ -27,7 +27,7 @@ impl HyprlandListener {
             HyprlandOpts::Workspace => {
                 let print_workspace = || {
                     if let Ok(wspaces) = Workspaces::get() {
-                        let mut wspaces:Vec<_> = wspaces.collect();
+                        let mut wspaces: Vec<_> = wspaces.collect();
                         wspaces.sort_by_key(|wspace| match wspace.id {
                             hyprland::shared::WorkspaceType::Unnamed(id) => id,
                             hyprland::shared::WorkspaceType::Named(_) => i32::MAX,
@@ -55,6 +55,9 @@ impl HyprlandListener {
                 listener.add_workspace_destroy_handler(move |wtype| {
                     eprintln!("Workspace {wtype:?} removed");
                     print_workspace()
+                });
+                listener.add_fullscreen_state_change_handler(move |_state| {
+                    print_workspace();
                 });
             }
             HyprlandOpts::Window => {
