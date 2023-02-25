@@ -42,11 +42,7 @@ impl HyprlandListener {
                                 WorkspaceData { is_active, data: w }
                             })
                             .collect();
-                        wspaces.sort_by_key(|wspace| match wspace.data.id {
-                            hyprland::shared::WorkspaceType::Unnamed(id) => id,
-                            hyprland::shared::WorkspaceType::Named(_) => i32::MAX,
-                            hyprland::shared::WorkspaceType::Special(_) => i32::MAX,
-                        });
+                        wspaces.sort_by_key(|wspace| wspace.data.id);
                         crate::print(&Some(wspaces));
                     } else {
                         crate::print::<()>(&None);
