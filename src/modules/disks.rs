@@ -1,5 +1,5 @@
 use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify, WatchDescriptor};
-use std::{collections::HashMap, ffi::OsStr, path::PathBuf, process::exit};
+use std::{ffi::OsStr, path::PathBuf, process::exit};
 
 const MEDIA_DIR: &str = concat!("/run/media/", env!("USER"));
 
@@ -9,7 +9,7 @@ pub struct DiskMon {
     notifier: Inotify,
     mount_disc: WatchDescriptor, // mount discriptors
     drive_disc: WatchDescriptor, // drives folder discriptor
-    extern_drives: HashMap<String, Option<String>>,
+    extern_drives: Vec<(String, Option<String>)>,
 }
 
 impl DiskMon {
@@ -34,7 +34,7 @@ impl DiskMon {
             notifier,
             mount_disc,
             drive_disc,
-            extern_drives: HashMap::new(),
+            extern_drives: Vec::new(),
         }
     }
     /// if a mount directory is created in /run/media/$USER/ means that drive is mounted, this function will map that mount point to that drive, lly for drive removal
@@ -51,16 +51,16 @@ impl DiskMon {
                     .iter()
                     .find(|m_point| m_point.path.ends_with(name))
                 {
-                    let drive = PathBuf::from(&m_point.what);
-                    if let Some(handle) = self
+                    if let Some((_, mnt_point)) = self
                         .extern_drives
-                        .get_mut(drive.file_name().unwrap().to_str().unwrap())
+                        .iter_mut()
+                        .find(|(drive_name, _)| m_point.what.ends_with(drive_name))
                     {
-                        *handle = Some(m_point.path.to_string_lossy().into_owned());
+                        *mnt_point = Some(m_point.path.to_string_lossy().into_owned());
                     } else {
                         eprintln!(
-                            "Failed to find drive {:?} in collection {:?}",
-                            drive, self.extern_drives
+                            "Failed to find drive {} in collection {:?}",
+                            m_point.what, self.extern_drives
                         );
                     }
                     break;
@@ -97,12 +97,19 @@ impl DiskMon {
             'check: {
                 if !(mask & AddWatchFlags::IN_CREATE).is_empty() {
                     if let Some(name) = os_name.to_str() {
-                        self.extern_drives.insert(String::from(name), None);
+                        self.extern_drives.push((String::from(name), None));
                         break 'check;
                     }
                     eprintln!("Failed insert Disk {os_name:?}");
                 } else if !(mask & AddWatchFlags::IN_DELETE).is_empty() {
-                    self.extern_drives.remove(name_ref);
+                    if let Some((index, _)) = self
+                        .extern_drives
+                        .iter_mut()
+                        .enumerate()
+                        .find(|(_, (drive_name, _))| drive_name == name_ref)
+                    {
+                        self.extern_drives.remove(index);
+                    }
                     break 'check;
                 } else {
                     eprintln!("Uncaught event {mask:?} for {os_name:?}");
