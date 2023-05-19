@@ -8,7 +8,10 @@ use std::{
 
 use pulse::{
     callbacks::ListResult,
-    context::Context,
+    context::{
+        introspect::{SinkInfo, SourceInfo},
+        Context,
+    },
     mainloop::standard::{IterateResult, Mainloop},
 };
 use serde::Serialize;
@@ -65,6 +68,23 @@ struct Sink {
     state: State,
 }
 
+impl From<&SinkInfo<'_>> for Sink {
+    fn from(value: &SinkInfo) -> Self {
+        Self {
+            name: value.name.as_ref().unwrap().to_string(),
+            index: value.index,
+            volume: value.volume.avg().0,
+            muted: value.mute,
+            monitor_index: value.monitor_source,
+            monitor_name: value
+                .monitor_source_name
+                .clone()
+                .map_or(String::from("Unknown"), |name| name.into_owned()),
+            state: State::from(value.state),
+        }
+    }
+}
+
 impl PartialEq for Sink {
     fn eq(&self, other: &Self) -> bool {
         self.index == other.index
@@ -88,6 +108,22 @@ struct Source {
     monitor_index: Option<u32>,
     monitor_name: Option<String>,
     state: State,
+}
+impl From<&SourceInfo<'_>> for Source {
+    fn from(value: &SourceInfo) -> Self {
+        Self {
+            name: value.name.as_ref().unwrap().to_string(),
+            index: value.index,
+            volume: value.volume.avg().0,
+            muted: value.mute,
+            monitor_index: value.monitor_of_sink,
+            monitor_name: value
+                .monitor_of_sink_name
+                .clone()
+                .map(|name| name.into_owned()),
+            state: State::from(value.state),
+        }
+    }
 }
 
 impl PartialEq for Source {
@@ -114,9 +150,9 @@ struct Information {
     sinks: HashSet<Sink>,
     sources: HashSet<Source>,
     /// default sink index
-    default_sink: u32,
+    default_sink: Option<Sink>,
     /// default source index
-    default_source: u32,
+    default_source: Option<Source>,
 }
 impl Connection {
     fn new(timeout: u64) -> Result<Self> {
@@ -178,8 +214,8 @@ impl Module for PulseAudio {
         let devices = Arc::new(Mutex::new(Information {
             sinks: HashSet::new(),
             sources: HashSet::new(),
-            default_sink: 0,
-            default_source: 0,
+            default_sink: None,
+            default_source: None,
         }));
         {
             let introspector = conn.cnxt.introspect();
@@ -206,7 +242,7 @@ impl Module for PulseAudio {
             // wait for call back to finish
             while status.get_state() == pulse::operation::State::Running {
                 std::thread::sleep(std::time::Duration::from_millis(1));
-                if !conn.mnlp.iterate(false).is_success(){
+                if !conn.mnlp.iterate(false).is_success() {
                     return Err(anyhow!("Failed to iterate mnloop for sources"));
                 }
             }
@@ -234,31 +270,31 @@ impl Module for PulseAudio {
             // wait for call back
             while status.get_state() == pulse::operation::State::Running {
                 std::thread::sleep(std::time::Duration::from_millis(1));
-                if !conn.mnlp.iterate(false).is_success(){
+                if !conn.mnlp.iterate(false).is_success() {
                     return Err(anyhow!("Failed to iterate mnloop for sources"));
                 }
             }
-                let device_c = Arc::clone(&devices);
-                let status = introspector.get_sink_info_by_name("@DEFAULT_SINK@", move |list| {
-                    if let pulse::callbacks::ListResult::Item(sink) = list {
-                        device_c.lock().unwrap().default_sink = sink.index;
-                    }
-                });
+            let device_c = Arc::clone(&devices);
+            let status = introspector.get_sink_info_by_name("@DEFAULT_SINK@", move |list| {
+                if let pulse::callbacks::ListResult::Item(sink) = list {
+                    device_c.lock().unwrap().default_sink = Some(Sink::from(sink));
+                }
+            });
             while status.get_state() == pulse::operation::State::Running {
                 std::thread::sleep(std::time::Duration::from_millis(1));
-                if !conn.mnlp.iterate(false).is_success(){
+                if !conn.mnlp.iterate(false).is_success() {
                     return Err(anyhow!("Failed to iterate mnloop for sources"));
                 }
             }
-                let device_c = Arc::clone(&devices);
-                let status = introspector.get_source_info_by_name("@DEFAULT_SOURCE@", move |list| {
-                    if let pulse::callbacks::ListResult::Item(source) = list {
-                        device_c.lock().unwrap().default_source = source.index;
-                    }
-                });
+            let device_c = Arc::clone(&devices);
+            let status = introspector.get_source_info_by_name("@DEFAULT_SOURCE@", move |list| {
+                if let pulse::callbacks::ListResult::Item(source) = list {
+                    device_c.lock().unwrap().default_source = Some(source.into());
+                }
+            });
             while status.get_state() == pulse::operation::State::Running {
                 std::thread::sleep(std::time::Duration::from_millis(1));
-                if !conn.mnlp.iterate(false).is_success(){
+                if !conn.mnlp.iterate(false).is_success() {
                     return Err(anyhow!("Failed to iterate mnloop for sources"));
                 }
             }
@@ -277,13 +313,13 @@ impl Module for PulseAudio {
                 let device_c = Arc::clone(&devices);
                 introspector.get_sink_info_by_name("@DEFAULT_SINK@", move |list| {
                     if let pulse::callbacks::ListResult::Item(sink) = list {
-                        device_c.lock().unwrap().default_sink = sink.index;
+                        device_c.lock().unwrap().default_sink = Some(sink.into());
                     }
                 });
                 let device_c = Arc::clone(&devices);
                 introspector.get_source_info_by_name("@DEFAULT_SOURCE@", move |list| {
                     if let pulse::callbacks::ListResult::Item(source) = list {
-                        device_c.lock().unwrap().default_source = source.index;
+                        device_c.lock().unwrap().default_source = Some(source.into());
                     }
                 });
                 match operation {
