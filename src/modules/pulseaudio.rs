@@ -1,7 +1,6 @@
 use anyhow::{anyhow, Result};
 use std::{
     collections::HashSet,
-    rc::Rc,
     sync::{Arc, Mutex},
     thread::sleep,
     time::Duration,
@@ -174,7 +173,6 @@ impl Module for PulseAudio {
         let interest = pulse::context::subscribe::InterestMaskSet::SINK
             | pulse::context::subscribe::InterestMaskSet::SOURCE;
         conn.cnxt.subscribe(interest, |_| {});
-        let introspector = Rc::new(Mutex::new(conn.cnxt.introspect()));
         // print the data for initialization
         // sources and sinks
         let devices = Arc::new(Mutex::new(Information {
@@ -184,9 +182,9 @@ impl Module for PulseAudio {
             default_source: 0,
         }));
         {
-            let introspector_guard = introspector.lock().unwrap();
+            let introspector = conn.cnxt.introspect();
             let dclone = devices.clone();
-            let status = introspector_guard.get_sink_info_list(move |res| {
+            let status = introspector.get_sink_info_list(move |res| {
                 let ListResult::Item(sink) = res else{ return};
                 let mut dlock = dclone.lock().unwrap();
                 dlock.sinks.insert(Sink {
@@ -207,10 +205,14 @@ impl Module for PulseAudio {
             });
             // wait for call back to finish
             while status.get_state() == pulse::operation::State::Running {
-                std::thread::sleep(std::time::Duration::from_millis(1))
+                std::thread::sleep(std::time::Duration::from_millis(1));
+                if !conn.mnlp.iterate(false).is_success(){
+                    return Err(anyhow!("Failed to iterate mnloop for sources"));
+                }
             }
             let dclone = devices.clone();
-            let status = introspector_guard.get_source_info_list(move |res| {
+            let introspector = conn.cnxt.introspect();
+            let status = introspector.get_source_info_list(move |res| {
                 let ListResult::Item(source) = res else{ return};
                 let mut dlock = dclone.lock().unwrap();
                 dlock.sources.insert(Source {
@@ -231,11 +233,15 @@ impl Module for PulseAudio {
             });
             // wait for call back
             while status.get_state() == pulse::operation::State::Running {
-                std::thread::sleep(std::time::Duration::from_millis(1))
+                std::thread::sleep(std::time::Duration::from_millis(1));
+                if !conn.mnlp.iterate(false).is_success(){
+                    return Err(anyhow!("Failed to iterate mnloop for sources"));
+                }
             }
             let dlock = devices.lock().unwrap();
             crate::print(&Some(std::ops::Deref::deref(&dlock)))
         }
+        let introspector = conn.cnxt.introspect();
         conn.cnxt
             .set_subscribe_callback(Some(Box::new(move |facility, operation, index| {
                 let Some(operation) = operation else {
@@ -244,15 +250,14 @@ impl Module for PulseAudio {
                 let Some(facility) = facility else {
                     return;
                 };
-                let introspector_guard = introspector.lock().unwrap();
                 let device_c = Arc::clone(&devices);
-                introspector_guard.get_sink_info_by_name("@DEFAULT_SINK@", move |list| {
+                introspector.get_sink_info_by_name("@DEFAULT_SINK@", move |list| {
                     if let pulse::callbacks::ListResult::Item(sink) = list {
                         device_c.lock().unwrap().default_sink = sink.index;
                     }
                 });
                 let device_c = Arc::clone(&devices);
-                introspector_guard.get_sink_info_by_name("@DEFAULT_SOURCE@", move |list| {
+                introspector.get_sink_info_by_name("@DEFAULT_SOURCE@", move |list| {
                     if let pulse::callbacks::ListResult::Item(sink) = list {
                         device_c.lock().unwrap().default_source = sink.index;
                     }
@@ -262,7 +267,7 @@ impl Module for PulseAudio {
                         match facility{
                             pulse::context::subscribe::Facility::Sink => {
                                 let dclone = devices.clone();
-                                introspector_guard.get_sink_info_by_index(index, move |res|{
+                                introspector.get_sink_info_by_index(index, move |res|{
                                     let ListResult::Item(sink) = res else{ return};
                                     let mut dlock = dclone.lock().unwrap();
                                     dlock.sinks.insert(Sink{
@@ -278,7 +283,7 @@ impl Module for PulseAudio {
                             },
                             pulse::context::subscribe::Facility::Source => {
                                 let dclone = devices.clone();
-                                introspector_guard.get_source_info_by_index(index, move |res|{
+                                introspector.get_source_info_by_index(index, move |res|{
                                     let ListResult::Item(source) = res else{ return};
                                     let mut dlock = dclone.lock().unwrap();
                                     dlock.sources.insert(Source{
@@ -299,7 +304,7 @@ impl Module for PulseAudio {
                         match facility{
                             pulse::context::subscribe::Facility::Sink => {
                                 let dclone = devices.clone();
-                                introspector_guard.get_sink_info_by_index(index, move |res|{
+                                introspector.get_sink_info_by_index(index, move |res|{
                                     let ListResult::Item(sink) = res else{ return};
                                     let mut dlock = dclone.lock().unwrap();
                                     dlock.sinks.replace(Sink{
@@ -316,7 +321,7 @@ impl Module for PulseAudio {
                             },
                             pulse::context::subscribe::Facility::Source => {
                                 let dclone = devices.clone();
-                                introspector_guard.get_source_info_by_index(index, move |res|{
+                                introspector.get_source_info_by_index(index, move |res|{
                                     let ListResult::Item(source) = res else{ return};
                                     let mut dlock = dclone.lock().unwrap();
                                     dlock.sources.replace(Source{
