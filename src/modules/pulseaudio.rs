@@ -238,6 +238,30 @@ impl Module for PulseAudio {
                     return Err(anyhow!("Failed to iterate mnloop for sources"));
                 }
             }
+                let device_c = Arc::clone(&devices);
+                let status = introspector.get_sink_info_by_name("@DEFAULT_SINK@", move |list| {
+                    if let pulse::callbacks::ListResult::Item(sink) = list {
+                        device_c.lock().unwrap().default_sink = sink.index;
+                    }
+                });
+            while status.get_state() == pulse::operation::State::Running {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+                if !conn.mnlp.iterate(false).is_success(){
+                    return Err(anyhow!("Failed to iterate mnloop for sources"));
+                }
+            }
+                let device_c = Arc::clone(&devices);
+                let status = introspector.get_source_info_by_name("@DEFAULT_SOURCE@", move |list| {
+                    if let pulse::callbacks::ListResult::Item(source) = list {
+                        device_c.lock().unwrap().default_source = source.index;
+                    }
+                });
+            while status.get_state() == pulse::operation::State::Running {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+                if !conn.mnlp.iterate(false).is_success(){
+                    return Err(anyhow!("Failed to iterate mnloop for sources"));
+                }
+            }
             let dlock = devices.lock().unwrap();
             crate::print(&Some(std::ops::Deref::deref(&dlock)))
         }
@@ -257,9 +281,9 @@ impl Module for PulseAudio {
                     }
                 });
                 let device_c = Arc::clone(&devices);
-                introspector.get_sink_info_by_name("@DEFAULT_SOURCE@", move |list| {
-                    if let pulse::callbacks::ListResult::Item(sink) = list {
-                        device_c.lock().unwrap().default_source = sink.index;
+                introspector.get_source_info_by_name("@DEFAULT_SOURCE@", move |list| {
+                    if let pulse::callbacks::ListResult::Item(source) = list {
+                        device_c.lock().unwrap().default_source = source.index;
                     }
                 });
                 match operation {
