@@ -18,6 +18,54 @@ use serde::Serialize;
 
 use crate::Module;
 
+macro_rules! volume {
+    ($dev:ident) => {
+        ($dev.volume.avg().0 * 100) / 0xffff
+    };
+}
+
+#[derive(Debug)]
+enum WaitError {
+    Quit,
+    Error(pulse::error::PAErr),
+}
+
+/// Waiter trait for pulse operation till it gets executed
+trait WaitOp {
+    /// Wait for Operation to finish or get cancelled while mainloop running in background
+    /// recommended for callbacks
+    fn wait(&self);
+    /// Wait for Operation to finish and execute mainloop
+    /// if mainloop returns error then breakout
+    fn wait_with_loop(
+        &self,
+        mnloop: &mut pulse::mainloop::standard::Mainloop,
+    ) -> Result<(), WaitError>;
+}
+
+impl<T: ?Sized> WaitOp for pulse::operation::Operation<T> {
+    fn wait(&self) {
+        while self.get_state() == pulse::operation::State::Running {
+            std::thread::sleep(std::time::Duration::from_millis(50))
+        }
+    }
+
+    fn wait_with_loop(
+        &self,
+        mnloop: &mut pulse::mainloop::standard::Mainloop,
+    ) -> Result<(), WaitError> {
+        while self.get_state() == pulse::operation::State::Running {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            match mnloop.iterate(false) {
+                IterateResult::Quit(_) => return Err(WaitError::Quit),
+                IterateResult::Err(e) => return Err(WaitError::Error(e)),
+                _ => (),
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct Data {
     volume: u32,
@@ -71,9 +119,12 @@ struct Sink {
 impl From<&SinkInfo<'_>> for Sink {
     fn from(value: &SinkInfo) -> Self {
         Self {
-            name: value.name.as_ref().unwrap().to_string(),
+            name: value
+                .name
+                .clone()
+                .map_or(String::from("Unknown"), |name| name.into_owned()),
             index: value.index,
-            volume: (value.volume.avg().0 * 100 ) / 0xffff,
+            volume: volume!(value),
             muted: value.mute,
             monitor_index: value.monitor_source,
             monitor_name: value
@@ -112,9 +163,12 @@ struct Source {
 impl From<&SourceInfo<'_>> for Source {
     fn from(value: &SourceInfo) -> Self {
         Self {
-            name: value.name.as_ref().unwrap().to_string(),
+            name: value
+                .name
+                .clone()
+                .map_or(String::from("Unknown"), |name| name.into_owned()),
             index: value.index,
-            volume: (value.volume.avg().0 * 100 ) / 0xffff,
+            volume: volume!(value),
             muted: value.mute,
             monitor_index: value.monitor_of_sink,
             monitor_name: value
@@ -193,6 +247,11 @@ impl Connection {
     }
 }
 
+/// pulse operation which are sent to another thread to wait for
+type OpsMsgs = (
+    Vec<pulse::operation::Operation<dyn FnMut(ListResult<&SinkInfo<'_>>)>>,
+    Vec<pulse::operation::Operation<dyn FnMut(ListResult<&SourceInfo<'_>>)>>,
+);
 pub struct PulseAudio {}
 
 impl Module for PulseAudio {
@@ -217,93 +276,71 @@ impl Module for PulseAudio {
             default_sink: None,
             default_source: None,
         }));
+        let introspector = conn.cnxt.introspect();
         {
-            let introspector = conn.cnxt.introspect();
             let dclone = devices.clone();
-            let status = introspector.get_sink_info_list(move |res| {
-                let ListResult::Item(sink) = res else{ return};
-                let mut dlock = dclone.lock().unwrap();
-                dlock.sinks.insert(Sink {
-                    name: sink
-                        .name
-                        .clone()
-                        .map_or(String::from("Unknown"), |name| name.into_owned()),
-                    index: sink.index,
-                    volume: (sink.volume.avg().0 * 100 ) / 0xffff,
-                    muted: sink.mute,
-                    monitor_index: sink.monitor_source,
-                    monitor_name: sink
-                        .monitor_source_name
-                        .clone()
-                        .map_or(String::from("Unknown"), |name| name.into_owned()),
-                    state: State::from(sink.state),
-                });
-            });
-            // wait for call back to finish
-            while status.get_state() == pulse::operation::State::Running {
-                std::thread::sleep(std::time::Duration::from_millis(1));
-                if !conn.mnlp.iterate(false).is_success() {
-                    return Err(anyhow!("Failed to iterate mnloop for sources"));
-                }
-            }
+            introspector
+                .get_sink_info_list(move |res| {
+                    let ListResult::Item(sink) = res else{ return};
+                    let mut dlock = dclone.lock().unwrap();
+                    dlock.sinks.insert(Sink::from(sink));
+                })
+                .wait_with_loop(&mut conn.mnlp)
+                .unwrap();
             let dclone = devices.clone();
             let introspector = conn.cnxt.introspect();
-            let status = introspector.get_source_info_list(move |res| {
-                let ListResult::Item(source) = res else{ return};
-                let mut dlock = dclone.lock().unwrap();
-                dlock.sources.insert(Source {
-                    name: source
-                        .name
-                        .clone()
-                        .map_or(String::from("Unknown"), |name| name.into_owned()),
-                    index: source.index,
-                    volume: (source.volume.avg().0 * 100 ) / 0xffff,
-                    muted: source.mute,
-                    monitor_index: source.monitor_of_sink,
-                    monitor_name: source
-                        .monitor_of_sink_name
-                        .clone()
-                        .map(|name| name.into_owned()),
-                    state: State::from(source.state),
-                });
-            });
-            // wait for call back
-            while status.get_state() == pulse::operation::State::Running {
-                std::thread::sleep(std::time::Duration::from_millis(1));
-                if !conn.mnlp.iterate(false).is_success() {
-                    return Err(anyhow!("Failed to iterate mnloop for sources"));
-                }
-            }
+            introspector
+                .get_source_info_list(move |res| {
+                    let ListResult::Item(source) = res else{ return};
+                    let mut dlock = dclone.lock().unwrap();
+                    dlock.sources.insert(Source::from(source));
+                })
+                .wait_with_loop(&mut conn.mnlp)
+                .unwrap();
+
             let device_c = Arc::clone(&devices);
-            let status = introspector.get_sink_info_by_name("@DEFAULT_SINK@", move |list| {
-                if let pulse::callbacks::ListResult::Item(sink) = list {
-                    device_c.lock().unwrap().default_sink = Some(Sink::from(sink));
-                }
-            });
-            while status.get_state() == pulse::operation::State::Running {
-                std::thread::sleep(std::time::Duration::from_millis(1));
-                if !conn.mnlp.iterate(false).is_success() {
-                    return Err(anyhow!("Failed to iterate mnloop for sources"));
-                }
-            }
+            introspector
+                .get_sink_info_by_name("@DEFAULT_SINK@", move |list| {
+                    if let pulse::callbacks::ListResult::Item(sink) = list {
+                        device_c.lock().unwrap().default_sink = Some(Sink::from(sink));
+                    }
+                })
+                .wait_with_loop(&mut conn.mnlp)
+                .unwrap();
             let device_c = Arc::clone(&devices);
-            let status = introspector.get_source_info_by_name("@DEFAULT_SOURCE@", move |list| {
-                if let pulse::callbacks::ListResult::Item(source) = list {
-                    device_c.lock().unwrap().default_source = Some(source.into());
-                }
-            });
-            while status.get_state() == pulse::operation::State::Running {
-                std::thread::sleep(std::time::Duration::from_millis(1));
-                if !conn.mnlp.iterate(false).is_success() {
-                    return Err(anyhow!("Failed to iterate mnloop for sources"));
-                }
-            }
+            introspector
+                .get_source_info_by_name("@DEFAULT_SOURCE@", move |list| {
+                    if let pulse::callbacks::ListResult::Item(source) = list {
+                        device_c.lock().unwrap().default_source = Some(source.into());
+                    }
+                })
+                .wait_with_loop(&mut conn.mnlp)
+                .unwrap();
             let dlock = devices.lock().unwrap();
             crate::print(&Some(std::ops::Deref::deref(&dlock)))
         }
-        let introspector = conn.cnxt.introspect();
+        let (tx, rx): (
+            std::sync::mpsc::Sender<OpsMsgs>,
+            std::sync::mpsc::Receiver<OpsMsgs>,
+        ) = std::sync::mpsc::channel();
+        let dclone = Arc::clone(&devices);
+        // had to create separate thread for waiting for operations to finish, in call back if we wait then they will be
+        // blocked forever. If we don't wait for them then Information printed will be of last operation, i.e. until
+        // the event call back is not finished othercallbacks requesting information won't get executed. This is fine if
+        // the volume differs by marginal but won't work for mute/unmute that will show exact opposite, so had to move it to another thread
+        std::thread::spawn(move || {
+            for msg in rx.iter() {
+                let (sink_ops, src_ops) = msg;
+                sink_ops.iter().for_each(|op| op.wait());
+                src_ops.iter().for_each(|op| op.wait());
+                let dlock = dclone.lock().unwrap();
+                crate::print(&Some(std::ops::Deref::deref(&dlock)));
+            }
+        });
         conn.cnxt
             .set_subscribe_callback(Some(Box::new(move |facility, operation, index| {
+                let mut sink_ops = Vec::with_capacity(4);
+                let mut src_ops = Vec::with_capacity(4);
                 let Some(operation) = operation else {
                     return;
                 };
@@ -311,51 +348,35 @@ impl Module for PulseAudio {
                     return;
                 };
                 let device_c = Arc::clone(&devices);
-                introspector.get_sink_info_by_name("@DEFAULT_SINK@", move |list| {
+                sink_ops.push(introspector.get_sink_info_by_name("@DEFAULT_SINK@", move |list| {
                     if let pulse::callbacks::ListResult::Item(sink) = list {
                         device_c.lock().unwrap().default_sink = Some(sink.into());
                     }
-                });
+                }));
                 let device_c = Arc::clone(&devices);
-                introspector.get_source_info_by_name("@DEFAULT_SOURCE@", move |list| {
+                src_ops.push(introspector.get_source_info_by_name("@DEFAULT_SOURCE@", move |list| {
                     if let pulse::callbacks::ListResult::Item(source) = list {
                         device_c.lock().unwrap().default_source = Some(source.into());
                     }
-                });
+                }));
                 match operation {
                     pulse::context::subscribe::Operation::New => {
                         match facility{
                             pulse::context::subscribe::Facility::Sink => {
                                 let dclone = devices.clone();
-                                introspector.get_sink_info_by_index(index, move |res|{
+                                sink_ops.push(introspector.get_sink_info_by_index(index, move |res|{
                                     let ListResult::Item(sink) = res else{ return};
                                     let mut dlock = dclone.lock().unwrap();
-                                    dlock.sinks.insert(Sink{
-                                        name: sink.name.clone().map_or(String::from("Unknown"), |name| name.into_owned()),
-                                        index,
-                                        volume: (sink.volume.avg().0 * 100 ) / 0xffff,
-                                        muted: sink.mute,
-                                        monitor_index: sink.monitor_source,
-                                        monitor_name: sink.monitor_source_name.clone().map_or(String::from("Unknown"), |name| name.into_owned()),
-                                        state: State::from(sink.state)
-                                    });
-                                });
+                                    dlock.sinks.insert(Sink::from(sink));
+                                }));
                             },
                             pulse::context::subscribe::Facility::Source => {
                                 let dclone = devices.clone();
-                                introspector.get_source_info_by_index(index, move |res|{
+                                src_ops.push(introspector.get_source_info_by_index(index, move |res|{
                                     let ListResult::Item(source) = res else{ return};
                                     let mut dlock = dclone.lock().unwrap();
-                                    dlock.sources.insert(Source{
-                                        name: source.name.clone().map_or(String::from("Unknown"), |name| name.into_owned()),
-                                        index,
-                                        volume: (source.volume.avg().0 * 100 ) / 0xffff,
-                                        muted: source.mute,
-                                        monitor_index: source.monitor_of_sink,
-                                        monitor_name: source.monitor_of_sink_name.clone().map(|name| name.into_owned()),
-                                        state: State::from(source.state)
-                                    });
-                                });
+                                    dlock.sources.insert(Source::from(source));
+                                }));
                             },
                             _ => eprintln!("{facility:?} is not handled when inserted, This was not supposed to enabled also"),
                         };
@@ -364,44 +385,27 @@ impl Module for PulseAudio {
                         match facility{
                             pulse::context::subscribe::Facility::Sink => {
                                 let dclone = devices.clone();
-                                introspector.get_sink_info_by_index(index, move |res|{
+                                sink_ops.push(introspector.get_sink_info_by_index(index, move |res|{
                                     let ListResult::Item(sink) = res else{ return};
                                     let mut dlock = dclone.lock().unwrap();
-                                    dlock.sinks.replace(Sink{
-                                        name: sink.name.clone().map_or(String::from("Unknown"), |name| name.into_owned()),
-                                        index,
-                                        volume: (sink.volume.avg().0 *100)/0xffff,
-                                        muted: sink.mute,
-                                        monitor_index: sink.monitor_source,
-                                        monitor_name: sink.monitor_source_name.clone().map_or(String::from("Unknown"), |name| name.into_owned()),
-                                        state: State::from(sink.state)
-                                    });
-                                });
+                                    dlock.sinks.replace(Sink::from(sink));
+                                }));
 
                             },
                             pulse::context::subscribe::Facility::Source => {
                                 let dclone = devices.clone();
-                                introspector.get_source_info_by_index(index, move |res|{
+                                src_ops.push(introspector.get_source_info_by_index(index, move |res|{
                                     let ListResult::Item(source) = res else{ return};
                                     let mut dlock = dclone.lock().unwrap();
-                                    dlock.sources.replace(Source{
-                                        name: source.name.clone().map_or(String::from("Unknown"), |name| name.into_owned()),
-                                        index,
-                                        volume: (source.volume.avg().0 * 100 ) / 0xffff,
-                                        muted: source.mute,
-                                        monitor_index: source.monitor_of_sink,
-                                        monitor_name: source.monitor_of_sink_name.clone().map(|name| name.into_owned()),
-                                        state: State::from(source.state)
-                                    });
-                                });
+                                    dlock.sources.replace(Source::from(source));
+                                }));
                             },
                             _ => panic!("We are not expecting {facility:?}, this was supposed to be masked"),
                         }
                     },
                     pulse::context::subscribe::Operation::Removed => todo!(),
                 }
-                let dlock = devices.lock().unwrap();
-                crate::print(&Some(std::ops::Deref::deref(&dlock)))
+                tx.send((sink_ops, src_ops)).unwrap();
             })));
         match conn.mnlp.run() {
             Ok(_retval) => Ok(()),
