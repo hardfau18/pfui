@@ -117,21 +117,21 @@ struct Sink {
 }
 
 impl From<&SinkInfo<'_>> for Sink {
-    fn from(value: &SinkInfo) -> Self {
+    fn from(sink: &SinkInfo) -> Self {
         Self {
-            name: value
+            name: sink
                 .name
                 .clone()
                 .map_or(String::from("Unknown"), |name| name.into_owned()),
-            index: value.index,
-            volume: volume!(value),
-            muted: value.mute,
-            monitor_index: value.monitor_source,
-            monitor_name: value
+            index: sink.index,
+            volume: volume!(sink),
+            muted: sink.mute || sink.volume.avg().is_muted(),
+            monitor_index: sink.monitor_source,
+            monitor_name: sink
                 .monitor_source_name
                 .clone()
                 .map_or(String::from("Unknown"), |name| name.into_owned()),
-            state: State::from(value.state),
+            state: State::from(sink.state),
         }
     }
 }
@@ -161,21 +161,21 @@ struct Source {
     state: State,
 }
 impl From<&SourceInfo<'_>> for Source {
-    fn from(value: &SourceInfo) -> Self {
+    fn from(source: &SourceInfo) -> Self {
         Self {
-            name: value
+            name: source
                 .name
                 .clone()
                 .map_or(String::from("Unknown"), |name| name.into_owned()),
-            index: value.index,
-            volume: volume!(value),
-            muted: value.mute,
-            monitor_index: value.monitor_of_sink,
-            monitor_name: value
+            index: source.index,
+            volume: volume!(source),
+            muted: source.mute || source.volume.is_muted(),
+            monitor_index: source.monitor_of_sink,
+            monitor_name: source
                 .monitor_of_sink_name
                 .clone()
                 .map(|name| name.into_owned()),
-            state: State::from(value.state),
+            state: State::from(source.state),
         }
     }
 }
