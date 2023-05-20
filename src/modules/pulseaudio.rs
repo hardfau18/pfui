@@ -73,7 +73,7 @@ impl From<&SinkInfo<'_>> for Sink {
         Self {
             name: value.name.as_ref().unwrap().to_string(),
             index: value.index,
-            volume: value.volume.avg().0,
+            volume: (value.volume.avg().0 * 100 ) / 0xffff,
             muted: value.mute,
             monitor_index: value.monitor_source,
             monitor_name: value
@@ -114,7 +114,7 @@ impl From<&SourceInfo<'_>> for Source {
         Self {
             name: value.name.as_ref().unwrap().to_string(),
             index: value.index,
-            volume: value.volume.avg().0,
+            volume: (value.volume.avg().0 * 100 ) / 0xffff,
             muted: value.mute,
             monitor_index: value.monitor_of_sink,
             monitor_name: value
@@ -229,7 +229,7 @@ impl Module for PulseAudio {
                         .clone()
                         .map_or(String::from("Unknown"), |name| name.into_owned()),
                     index: sink.index,
-                    volume: sink.volume.avg().0,
+                    volume: (sink.volume.avg().0 * 100 ) / 0xffff,
                     muted: sink.mute,
                     monitor_index: sink.monitor_source,
                     monitor_name: sink
@@ -257,7 +257,7 @@ impl Module for PulseAudio {
                         .clone()
                         .map_or(String::from("Unknown"), |name| name.into_owned()),
                     index: source.index,
-                    volume: source.volume.avg().0,
+                    volume: (source.volume.avg().0 * 100 ) / 0xffff,
                     muted: source.mute,
                     monitor_index: source.monitor_of_sink,
                     monitor_name: source
@@ -333,7 +333,7 @@ impl Module for PulseAudio {
                                     dlock.sinks.insert(Sink{
                                         name: sink.name.clone().map_or(String::from("Unknown"), |name| name.into_owned()),
                                         index,
-                                        volume: sink.volume.avg().0,
+                                        volume: (sink.volume.avg().0 * 100 ) / 0xffff,
                                         muted: sink.mute,
                                         monitor_index: sink.monitor_source,
                                         monitor_name: sink.monitor_source_name.clone().map_or(String::from("Unknown"), |name| name.into_owned()),
@@ -349,7 +349,7 @@ impl Module for PulseAudio {
                                     dlock.sources.insert(Source{
                                         name: source.name.clone().map_or(String::from("Unknown"), |name| name.into_owned()),
                                         index,
-                                        volume: source.volume.avg().0,
+                                        volume: (source.volume.avg().0 * 100 ) / 0xffff,
                                         muted: source.mute,
                                         monitor_index: source.monitor_of_sink,
                                         monitor_name: source.monitor_of_sink_name.clone().map(|name| name.into_owned()),
@@ -370,7 +370,7 @@ impl Module for PulseAudio {
                                     dlock.sinks.replace(Sink{
                                         name: sink.name.clone().map_or(String::from("Unknown"), |name| name.into_owned()),
                                         index,
-                                        volume: sink.volume.avg().0,
+                                        volume: (sink.volume.avg().0 *100)/0xffff,
                                         muted: sink.mute,
                                         monitor_index: sink.monitor_source,
                                         monitor_name: sink.monitor_source_name.clone().map_or(String::from("Unknown"), |name| name.into_owned()),
@@ -387,7 +387,7 @@ impl Module for PulseAudio {
                                     dlock.sources.replace(Source{
                                         name: source.name.clone().map_or(String::from("Unknown"), |name| name.into_owned()),
                                         index,
-                                        volume: source.volume.avg().0,
+                                        volume: (source.volume.avg().0 * 100 ) / 0xffff,
                                         muted: source.mute,
                                         monitor_index: source.monitor_of_sink,
                                         monitor_name: source.monitor_of_sink_name.clone().map(|name| name.into_owned()),
