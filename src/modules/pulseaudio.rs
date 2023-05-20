@@ -24,6 +24,12 @@ macro_rules! volume {
     };
 }
 
+/// pulse operation which are sent to another thread to wait for
+type OpsMsgs = (
+    Vec<pulse::operation::Operation<dyn FnMut(ListResult<&SinkInfo<'_>>)>>,
+    Vec<pulse::operation::Operation<dyn FnMut(ListResult<&SourceInfo<'_>>)>>,
+);
+
 #[derive(Debug)]
 enum WaitError {
     Quit,
@@ -199,7 +205,7 @@ pub struct Connection {
     mnlp: Mainloop,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Default)]
 struct Information {
     sinks: HashSet<Sink>,
     sources: HashSet<Source>,
@@ -208,6 +214,51 @@ struct Information {
     /// default source index
     default_source: Option<Source>,
 }
+
+fn reset(info: &Arc<Mutex<Information>>) {
+    let mut ilock = info.lock().unwrap();
+    ilock.sinks.clear();
+    ilock.sources.clear();
+    ilock.default_sink.take();
+    ilock.default_source.take();
+}
+
+fn refill_info(
+    info: &Arc<Mutex<Information>>,
+    intr: &pulse::context::introspect::Introspector,
+) -> OpsMsgs {
+    let mut src_ops = Vec::with_capacity(4);
+    let mut sink_ops = Vec::with_capacity(4);
+    let iclone = Arc::clone(info);
+    sink_ops.push(intr.get_sink_info_list(move |res| {
+        let ListResult::Item(sink) = res else{ return};
+        let mut ilock = iclone.lock().unwrap();
+        ilock.sinks.insert(Sink::from(sink));
+    }));
+    let iclone = Arc::clone(info);
+    src_ops.push(intr.get_source_info_list(move |res| {
+        let ListResult::Item(source) = res else{ return};
+        let mut ilock = iclone.lock().unwrap();
+        ilock.sources.insert(Source::from(source));
+    }));
+
+    let iclone = Arc::clone(info);
+    sink_ops.push(intr.get_sink_info_by_name("@DEFAULT_SINK@", move |list| {
+        if let pulse::callbacks::ListResult::Item(sink) = list {
+            iclone.lock().unwrap().default_sink = Some(Sink::from(sink));
+        }
+    }));
+    let iclone = Arc::clone(info);
+    src_ops.push(
+        intr.get_source_info_by_name("@DEFAULT_SOURCE@", move |list| {
+            if let pulse::callbacks::ListResult::Item(source) = list {
+                iclone.lock().unwrap().default_source = Some(source.into());
+            }
+        }),
+    );
+    (sink_ops, src_ops)
+}
+
 impl Connection {
     fn new(timeout: u64) -> Result<Self> {
         let mnlp = Mainloop::new().unwrap();
@@ -247,11 +298,6 @@ impl Connection {
     }
 }
 
-/// pulse operation which are sent to another thread to wait for
-type OpsMsgs = (
-    Vec<pulse::operation::Operation<dyn FnMut(ListResult<&SinkInfo<'_>>)>>,
-    Vec<pulse::operation::Operation<dyn FnMut(ListResult<&SourceInfo<'_>>)>>,
-);
 pub struct PulseAudio {}
 
 impl Module for PulseAudio {
@@ -270,55 +316,7 @@ impl Module for PulseAudio {
         conn.cnxt.subscribe(interest, |_| {});
         // print the data for initialization
         // sources and sinks
-        let devices = Arc::new(Mutex::new(Information {
-            sinks: HashSet::new(),
-            sources: HashSet::new(),
-            default_sink: None,
-            default_source: None,
-        }));
-        let introspector = conn.cnxt.introspect();
-        {
-            let dclone = devices.clone();
-            introspector
-                .get_sink_info_list(move |res| {
-                    let ListResult::Item(sink) = res else{ return};
-                    let mut dlock = dclone.lock().unwrap();
-                    dlock.sinks.insert(Sink::from(sink));
-                })
-                .wait_with_loop(&mut conn.mnlp)
-                .unwrap();
-            let dclone = devices.clone();
-            let introspector = conn.cnxt.introspect();
-            introspector
-                .get_source_info_list(move |res| {
-                    let ListResult::Item(source) = res else{ return};
-                    let mut dlock = dclone.lock().unwrap();
-                    dlock.sources.insert(Source::from(source));
-                })
-                .wait_with_loop(&mut conn.mnlp)
-                .unwrap();
-
-            let device_c = Arc::clone(&devices);
-            introspector
-                .get_sink_info_by_name("@DEFAULT_SINK@", move |list| {
-                    if let pulse::callbacks::ListResult::Item(sink) = list {
-                        device_c.lock().unwrap().default_sink = Some(Sink::from(sink));
-                    }
-                })
-                .wait_with_loop(&mut conn.mnlp)
-                .unwrap();
-            let device_c = Arc::clone(&devices);
-            introspector
-                .get_source_info_by_name("@DEFAULT_SOURCE@", move |list| {
-                    if let pulse::callbacks::ListResult::Item(source) = list {
-                        device_c.lock().unwrap().default_source = Some(source.into());
-                    }
-                })
-                .wait_with_loop(&mut conn.mnlp)
-                .unwrap();
-            let dlock = devices.lock().unwrap();
-            crate::print(&Some(std::ops::Deref::deref(&dlock)))
-        }
+        let devices = Arc::new(Mutex::new(Information::default()));
         let (tx, rx): (
             std::sync::mpsc::Sender<OpsMsgs>,
             std::sync::mpsc::Receiver<OpsMsgs>,
@@ -337,6 +335,9 @@ impl Module for PulseAudio {
                 crate::print(&Some(std::ops::Deref::deref(&dlock)));
             }
         });
+        let introspector = conn.cnxt.introspect();
+        tx.send(refill_info(&devices, &introspector)).unwrap();
+
         conn.cnxt
             .set_subscribe_callback(Some(Box::new(move |facility, operation, index| {
                 let mut sink_ops = Vec::with_capacity(4);
@@ -403,7 +404,10 @@ impl Module for PulseAudio {
                             _ => panic!("We are not expecting {facility:?}, this was supposed to be masked"),
                         }
                     },
-                    pulse::context::subscribe::Operation::Removed => todo!(),
+                    pulse::context::subscribe::Operation::Removed => {
+                        reset(&devices);
+                        (sink_ops, src_ops) = refill_info(&devices, &introspector);
+                    },
                 }
                 tx.send((sink_ops, src_ops)).unwrap();
             })));
