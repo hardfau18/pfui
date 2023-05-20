@@ -312,7 +312,7 @@ impl Module for PulseAudio {
             return Err(anyhow!("Error establishing connection"));
         }
         let interest = pulse::context::subscribe::InterestMaskSet::SINK
-            | pulse::context::subscribe::InterestMaskSet::SOURCE;
+            | pulse::context::subscribe::InterestMaskSet::SOURCE | pulse::context::subscribe::InterestMaskSet::SERVER;
         conn.cnxt.subscribe(interest, |_| {});
         // print the data for initialization
         // sources and sinks
@@ -401,6 +401,8 @@ impl Module for PulseAudio {
                                     dlock.sources.replace(Source::from(source));
                                 }));
                             },
+                            // if the server has changed may be default sink / source has changed, just update it
+                            pulse::context::subscribe::Facility::Server => (),
                             _ => panic!("We are not expecting {facility:?}, this was supposed to be masked"),
                         }
                     },
