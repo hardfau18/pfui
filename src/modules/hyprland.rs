@@ -66,6 +66,10 @@ impl HyprlandListener {
                     eprintln!("Workspace {wtype:?} removed");
                     print_workspace()
                 });
+                listener.add_active_window_change_handler(move |win_event| {
+                    eprintln!("Window changed: {win_event:?}");
+                    print_workspace();
+                });
                 listener.add_fullscreen_state_change_handler(move |_state| {
                     print_workspace();
                 });
@@ -116,7 +120,7 @@ impl HyprlandListener {
         };
         Self { listener }
     }
-    pub fn listen(self) -> Result<()> {
+    pub fn listen(mut self) -> Result<()> {
         self.listener.start_listener()?;
         Ok(())
     }
