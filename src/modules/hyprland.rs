@@ -5,6 +5,7 @@ use hyprland::{
     event_listener::EventListener,
     prelude::*,
 };
+use log::debug;
 use serde::Serialize;
 
 #[derive(Subcommand)]
@@ -51,23 +52,23 @@ impl HyprlandListener {
                 // for initial;
                 print_workspace();
                 listener.add_workspace_added_handler(move |wtype| {
-                    eprintln!("Workspace {wtype:?} added");
+                    debug!("Workspace {wtype:?} added");
                     print_workspace()
                 });
                 listener.add_workspace_moved_handler(move |mon_event| {
-                    eprintln!("Moniter changed: {mon_event:?}");
+                    debug!("Moniter changed: {mon_event:?}");
                     print_workspace()
                 });
                 listener.add_workspace_change_handler(move |wtype| {
-                    eprintln!("Workspace {wtype:?} changed");
+                    debug!("Workspace {wtype:?} changed");
                     print_workspace()
                 });
                 listener.add_workspace_destroy_handler(move |wtype| {
-                    eprintln!("Workspace {wtype:?} removed");
+                    debug!("Workspace {wtype:?} removed");
                     print_workspace()
                 });
                 listener.add_active_window_change_handler(move |win_event| {
-                    eprintln!("Window changed: {win_event:?}");
+                    debug!("Window changed: {win_event:?}");
                     print_workspace();
                 });
                 listener.add_fullscreen_state_change_handler(move |_state| {
@@ -83,19 +84,19 @@ impl HyprlandListener {
                     }
                 };
                 listener.add_window_open_handler(move |win_event| {
-                    eprintln!("Active window opened: {win_event:?}");
+                    debug!("Active window opened: {win_event:?}");
                     print_window();
                 });
                 listener.add_window_close_handler(move |win_event| {
-                    eprintln!("Window closed {win_event:?}");
+                    debug!("Window closed {win_event:?}");
                     print_window();
                 });
                 listener.add_window_moved_handler(move |win_event| {
-                    eprintln!("Window moved: {win_event:?}");
+                    debug!("Window moved: {win_event:?}");
                     print_window();
                 });
                 listener.add_active_window_change_handler(move |win_event| {
-                    eprintln!("Window changed: {win_event:?}");
+                    debug!("Window changed: {win_event:?}");
                     print_window();
                 });
             }
@@ -113,7 +114,7 @@ impl HyprlandListener {
                 // while in the beginning prinnt the active keyboard
                 print_keyboard();
                 listener.add_keyboard_layout_change_handler(move |layout| {
-                    eprintln!("KeyboardLayout changed: {layout:?}");
+                    debug!("KeyboardLayout changed: {layout:?}");
                     print_keyboard();
                 })
             }

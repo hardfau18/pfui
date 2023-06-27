@@ -22,6 +22,12 @@ use crate::modules::backlight;
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
+    /// enable verbosity, provide multiple times to enable more verbose logs
+    #[arg(short, long, action=clap::ArgAction::Count)]
+    verbose: u8,
+    /// output log file, logs will be written to this file, default will be written to stderr
+    #[arg(short, long)]
+    output: Option<std::path::PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -85,6 +91,32 @@ pub fn print<T: serde::Serialize>(info: &Option<T>) {
 
 fn main() {
     let cli = Cli::parse();
+    let mut builder = env_logger::builder();
+    let log_level = match cli.verbose {
+        0 => log::LevelFilter::Warn,
+        1 => log::LevelFilter::Info,
+        2 => log::LevelFilter::Debug,
+        3 => log::LevelFilter::Trace,
+        _ => {
+            eprintln!("Developer of this project are coming to debug your program, please wait!!!");
+            log::LevelFilter::Trace
+        }
+    };
+    builder.filter_level(log_level);
+    cli.output.and_then(|outbuf| {
+        println!("output enabled");
+        std::fs::OpenOptions::new()
+            .write(true)
+            .append(true)
+            .create(true)
+            .open(outbuf)
+            .ok()
+            .map(|fp| {
+                println!("creating file");
+                builder.target(env_logger::fmt::Target::Pipe(Box::new(fp)))
+            })
+    });
+    builder.init();
 
     match &cli.command {
         Some(Commands::Start(start)) => match start.module {

@@ -23,6 +23,8 @@ sway = { version = "3.0.1", package = "swayipc", optional = true }
 hyprland= {version = "0.3.0", optional = true}
 nix = { version = "0.26.2", default-features = false, features = ["inotify"], optional = true }
 mountinfo = "0.2.0"
+env_logger = "0.10.0"
+log = "0.4.19"
 
 [features]
 default = ["mpd", "pulseaudio", "sway", "hyprland", "backlight", "disk"]
