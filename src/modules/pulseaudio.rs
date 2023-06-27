@@ -312,7 +312,8 @@ impl Module for PulseAudio {
             return Err(anyhow!("Error establishing connection"));
         }
         let interest = pulse::context::subscribe::InterestMaskSet::SINK
-            | pulse::context::subscribe::InterestMaskSet::SOURCE | pulse::context::subscribe::InterestMaskSet::SERVER;
+            | pulse::context::subscribe::InterestMaskSet::SOURCE
+            | pulse::context::subscribe::InterestMaskSet::SERVER;
         conn.cnxt.subscribe(interest, |_| {});
         // print the data for initialization
         // sources and sinks
