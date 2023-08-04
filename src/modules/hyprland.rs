@@ -43,7 +43,7 @@ impl HyprlandListener {
                                 WorkspaceData { is_active, data: w }
                             })
                             .collect();
-                        wspaces.sort_by_key(|wspace| wspace.data.id);
+                        wspaces.sort_by(|s1, s2| s1.data.name.cmp(&s2.data.name));
                         crate::print(&Some(wspaces));
                     } else {
                         crate::print::<()>(&None);
