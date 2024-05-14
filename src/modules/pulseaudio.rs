@@ -231,13 +231,15 @@ fn refill_info(
     let mut sink_ops = Vec::with_capacity(4);
     let iclone = Arc::clone(info);
     sink_ops.push(intr.get_sink_info_list(move |res| {
-        let ListResult::Item(sink) = res else{ return};
+        let ListResult::Item(sink) = res else { return };
         let mut ilock = iclone.lock().unwrap();
         ilock.sinks.insert(Sink::from(sink));
     }));
     let iclone = Arc::clone(info);
     src_ops.push(intr.get_source_info_list(move |res| {
-        let ListResult::Item(source) = res else{ return};
+        let ListResult::Item(source) = res else {
+            return;
+        };
         let mut ilock = iclone.lock().unwrap();
         ilock.sources.insert(Source::from(source));
     }));

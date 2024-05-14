@@ -16,10 +16,13 @@ impl Backlight {
     pub fn new() -> Self {
         let notifier = Inotify::init(InitFlags::empty()).unwrap();
         // assuming first entry in /sys/class/backlight/ is the display path,
-        let Some(Ok(display_path)) = std::fs::read_dir("/sys/class/backlight/").unwrap_or_else(|error| {
-            eprintln!("Backlight not found: {error:?}");
+        let Some(Ok(display_path)) = std::fs::read_dir("/sys/class/backlight/")
+            .unwrap_or_else(|error| {
+                eprintln!("Backlight not found: {error:?}");
                 exit(1);
-        }).next() else{
+            })
+            .next()
+        else {
             eprintln!("No Backlight device found");
             exit(1);
         };

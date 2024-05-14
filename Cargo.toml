@@ -16,11 +16,11 @@ clap = { version = "4.0.19", features = ["derive", "color"] }
 serde = { version = "1.0.147", features = ["derive"] }
 serde_json = "1.0.87"
 anyhow = { version = "1.0.66" }
-mpd = { version = "0.0.12", optional = true }
+mpd = { version = "0.1", optional = true }
 time = { version = "0.1.44", optional = true }
 pulse = { version = "2.0", package = "libpulse-binding", optional = true }
 sway = { version = "3.0.1", package = "swayipc", optional = true }
-hyprland= {version = "0.3.9", optional = true}
+hyprland= { version = "0.4.0-alpha.2", optional = true }
 nix = { version = "0.26.2", default-features = false, features = ["inotify"], optional = true }
 mountinfo = "0.2.0"
 env_logger = "0.10.0"

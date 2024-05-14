@@ -35,8 +35,8 @@ impl Song {
 }
 #[derive(Debug, Serialize)]
 struct State {
-    elapsed: Option<i64>,
-    duration: Option<i64>,
+    elapsed: Option<u64>,
+    duration: Option<u64>,
     progress: Option<i8>,
     status: Option<MpdState>,
 }
@@ -70,18 +70,42 @@ impl From<&MpdSong> for Song {
         Song {
             file_path: Some(value.file.clone()),
             title: value.title.clone(),
-            album: value.tags.get("Album").cloned(),
-            artist: value.tags.get("Artist").cloned(),
-            date: value.tags.get("Date").cloned(),
-            genre: value.tags.get("Genre").cloned(),
+            album: value.tags.iter().find_map(|tag| {
+                if tag.0 == "Album" {
+                    Some(tag.1.clone())
+                } else {
+                    None
+                }
+            }),
+            artist: value.tags.iter().find_map(|tag| {
+                if tag.0 == "Artist" {
+                    Some(tag.1.clone())
+                } else {
+                    None
+                }
+            }),
+            date: value.tags.iter().find_map(|tag| {
+                if tag.0 == "Date" {
+                    Some(tag.1.clone())
+                } else {
+                    None
+                }
+            }),
+            genre: value.tags.iter().find_map(|tag| {
+                if tag.0 == "Genre" {
+                    Some(tag.1.clone())
+                } else {
+                    None
+                }
+            }),
         }
     }
 }
 
 impl From<&Status> for State {
     fn from(value: &Status) -> Self {
-        let elapsed = value.elapsed.map(|elapsed| elapsed.num_seconds());
-        let duration = value.duration.map(|duration| duration.num_seconds());
+        let elapsed = value.elapsed.map(|elapsed| elapsed.as_secs());
+        let duration = value.duration.map(|duration| duration.as_secs());
         let progress = if let (Some(elapsed), Some(duration)) = (elapsed, duration) {
             if let (Ok(elapsed), Ok(duration)) = (i32::try_from(elapsed), i32::try_from(duration)) {
                 i8::try_from(((f64::from(elapsed) / f64::from(duration)) * 100.0).round() as i64)
